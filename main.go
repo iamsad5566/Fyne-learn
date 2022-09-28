@@ -1,23 +1,32 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"log"
+	"math"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"gioui.org/app"
+	"gioui.org/f32"
 	"gioui.org/font/gofont"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 )
+
+var boilDurationInput widget.Editor
+var boilDuration float32
 
 var progress float32
 var progressIncrementer chan float32
@@ -79,6 +88,21 @@ func draw(w *app.Window, ops op.Ops, startButton widget.Clickable, th *material.
 
 				if startButton.Clicked() {
 					boiling = !boiling
+
+					// Read from the input box
+					inputString := boilDurationInput.Text()
+					inputString = strings.TrimSpace(inputString)
+					inputFloat, _ := strconv.ParseFloat(inputString, 32)
+					boilDuration = float32(inputFloat)
+					boilDuration = boilDuration / (1 - progress)
+				}
+
+				if boiling && progress < 1 {
+					boilRemain := (1 - progress) * boilDuration
+					// Format to 1 decimal.
+					inputStr := fmt.Sprintf("%.1f", math.Round(float64(boilRemain)*10)/10)
+					// Update the text in the inputbox
+					boilDurationInput.SetText(inputStr)
 				}
 
 				// Let's try out the flexbox layout concept:
@@ -88,21 +112,75 @@ func draw(w *app.Window, ops op.Ops, startButton widget.Clickable, th *material.
 					// Empty space is left at the start, i.e. at the top
 					Spacing: layout.SpaceStart,
 				}.Layout(gtx,
-					// We insert two rigid elements:
 					layout.Rigid(
 						func(gtx C) D {
-							circle := clip.Ellipse{
-								// Hard coding the x coordinate. Try resizing the window
-								// Min: image.Pt(80, 0),
-								// Max: image.Pt(320, 240),
-								// Soft coding the x coordinate. Try resizing the window
-								Min: image.Pt(gtx.Constraints.Max.X/2-300, 0),
-								Max: image.Pt(gtx.Constraints.Max.X/2+300, 600),
-							}.Op(gtx.Ops)
-							color := color.NRGBA{R: 200, A: 255}
-							paint.FillShape(gtx.Ops, color, circle)
-							d := image.Point{Y: 800}
+							// Draw a custom path, shaped like an egg
+							var eggPath clip.Path
+							op.Offset(image.Pt(gtx.Dp(200), gtx.Dp(150))).Add(gtx.Ops)
+							eggPath.Begin(gtx.Ops)
+							// Rotate from 0 to 360 degrees
+							for deg := 0.0; deg <= 360; deg++ {
+
+								// Egg math (really) at this brilliant site. Thanks!
+								// https://observablehq.com/@toja/egg-curve
+								// Convert degrees to radians
+								rad := deg / 360 * 2 * math.Pi
+								// Trig gives the distance in X and Y direction
+								cosT := math.Cos(rad)
+								sinT := math.Sin(rad)
+								// Constants to define the eggshape
+								a := 110.0
+								b := 150.0
+								d := 20.0
+								// The x/y coordinates
+								x := a * cosT
+								y := -(math.Sqrt(b*b-d*d*cosT*cosT) + d*sinT) * sinT
+								// Finally the point on the outline
+								p := f32.Pt(float32(x), float32(y))
+								// Draw the line to this point
+								eggPath.LineTo(p)
+							}
+							// Close the path
+							eggPath.Close()
+
+							// Get hold of the actual clip
+							eggArea := clip.Outline{Path: eggPath.End()}.Op()
+
+							// Fill the shape
+							// color := color.NRGBA{R: 255, G: 239, B: 174, A: 255}
+							color := color.NRGBA{R: 255, G: uint8(239 * (1 - progress)), B: uint8(174 * (1 - progress)), A: 255}
+							paint.FillShape(gtx.Ops, color, eggArea)
+
+							d := image.Point{Y: 335}
 							return layout.Dimensions{Size: d}
+						},
+					),
+
+					layout.Rigid(
+						func(gtx C) D {
+							ed := material.Editor(th, &boilDurationInput, "sec")
+							// Define characteristics of the input box
+							boilDurationInput.SingleLine = true
+							boilDurationInput.Alignment = text.Middle
+							// Define insets ...
+							margins := layout.Inset{
+								Top:    unit.Dp(0),
+								Right:  unit.Dp(170),
+								Bottom: unit.Dp(40),
+								Left:   unit.Dp(170),
+							}
+							// ... and borders ...
+							border := widget.Border{
+								Color:        color.NRGBA{R: 204, G: 204, B: 204, A: 255},
+								CornerRadius: unit.Dp(3),
+								Width:        unit.Dp(2),
+							}
+							// ... before laying it out, one inside the other
+							return margins.Layout(gtx,
+								func(gtx C) D {
+									return border.Layout(gtx, ed.Layout)
+								},
+							)
 						},
 					),
 
