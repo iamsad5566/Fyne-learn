@@ -1,1 +1,1 @@
-# Go-Pyscrape-GUI(temporal name)
+# Go-Fyne-GUI-Learn
